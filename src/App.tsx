@@ -275,7 +275,7 @@ export default function App() {
       <header className="app__header">
         <h1 className="app__brand">
           <FileText className="app__brand-icon" />
-          PdfMiniMerge
+          MiniMerge
         </h1>
         <div className="app__toolbar">
           <div className="app__view-toggle">
@@ -403,7 +403,7 @@ export default function App() {
 
                     {viewMode === "grid" ? (
                       <>
-                        <div className={previewClassName}>
+                        <div className={previewClassName} style={{ aspectRatio: `${page.width} / ${page.height}` }}>
                           <img
                             src={page.thumbnailUrl}
                             alt={`Page ${page.pageIndex + 1}`}
@@ -426,7 +426,7 @@ export default function App() {
                       </>
                     ) : (
                       <>
-                        <div className="page-card__list-preview">
+                        <div className="page-card__list-preview" style={{ aspectRatio: `${page.width} / ${page.height}` }}>
                           <img
                             src={page.thumbnailUrl}
                             alt="Thumbnail"
