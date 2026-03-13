@@ -36,12 +36,85 @@ function getSupportedDraggedFiles(dataTransfer: DataTransfer): File[] {
   return Array.from(dataTransfer.files).filter(isSupportedInputFile);
 }
 
+function getFileDropInsertionIndex(
+  container: HTMLElement | null,
+  viewMode: "grid" | "list",
+  clientX: number,
+  clientY: number,
+): number | null {
+  if (!container) {
+    return null;
+  }
+
+  const pageElements = Array.from(
+    container.querySelectorAll<HTMLElement>(".page-card"),
+  );
+  if (pageElements.length === 0) {
+    return 0;
+  }
+
+  if (viewMode === "list") {
+    for (const [index, element] of pageElements.entries()) {
+      const rect = element.getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) {
+        return index;
+      }
+    }
+
+    return pageElements.length;
+  }
+
+  const rows: Array<{
+    top: number;
+    bottom: number;
+    items: Array<{ element: HTMLElement; index: number }>;
+  }> = [];
+  const rowTolerance = 8;
+
+  pageElements.forEach((element, index) => {
+    const rect = element.getBoundingClientRect();
+    const lastRow = rows[rows.length - 1];
+
+    if (!lastRow || Math.abs(rect.top - lastRow.top) > rowTolerance) {
+      rows.push({
+        top: rect.top,
+        bottom: rect.bottom,
+        items: [{ element, index }],
+      });
+      return;
+    }
+
+    lastRow.bottom = Math.max(lastRow.bottom, rect.bottom);
+    lastRow.items.push({ element, index });
+  });
+
+  const targetRow =
+    rows.find((row, index) => {
+      const nextRow = rows[index + 1];
+      const rowBoundary = nextRow
+        ? row.bottom + (nextRow.top - row.bottom) / 2
+        : Number.POSITIVE_INFINITY;
+      return clientY < rowBoundary;
+    }) ?? rows[rows.length - 1];
+
+  for (const { element, index } of targetRow.items) {
+    const rect = element.getBoundingClientRect();
+    if (clientX < rect.left + rect.width / 2) {
+      return index;
+    }
+  }
+
+  return targetRow.items[targetRow.items.length - 1].index + 1;
+}
+
 function moveSelectedPages(
   currentPages: PdfPageNode[],
   selectedPageIds: Set<string>,
   insertionIndex: number,
 ): PdfPageNode[] {
-  const pagesToMove = currentPages.filter((page) => selectedPageIds.has(page.id));
+  const pagesToMove = currentPages.filter((page) =>
+    selectedPageIds.has(page.id),
+  );
   if (pagesToMove.length === 0) {
     return currentPages;
   }
@@ -78,6 +151,7 @@ export default function App() {
     null,
   );
   const emptyFileInputRef = useRef<HTMLInputElement>(null);
+  const pageCollectionRef = useRef<HTMLDivElement>(null);
 
   const clearSelection = useCallback(() => {
     setSelectedPageIds(new Set());
@@ -196,14 +270,18 @@ export default function App() {
       }
 
       e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
       setIsDraggingFile(true);
 
-      const target = e.target as HTMLElement;
-      if (!target.closest(".page-card")) {
-        setDropInsertionIndex(pages.length);
-      }
+      const insertionIndex = getFileDropInsertionIndex(
+        pageCollectionRef.current,
+        viewMode,
+        e.clientX,
+        e.clientY,
+      );
+      setDropInsertionIndex(insertionIndex ?? pages.length);
     },
-    [draggedPageId, pages.length],
+    [draggedPageId, pages.length, viewMode],
   );
 
   const handleDragLeaveFile = useCallback(
@@ -356,7 +434,16 @@ export default function App() {
     e.preventDefault();
     e.stopPropagation();
     if (hasFileDrag) {
+      e.dataTransfer.dropEffect = "copy";
       setIsDraggingFile(true);
+      const insertionIndex = getFileDropInsertionIndex(
+        pageCollectionRef.current,
+        viewMode,
+        e.clientX,
+        e.clientY,
+      );
+      setDropInsertionIndex(insertionIndex ?? pages.length);
+      return;
     }
 
     const rect = e.currentTarget.getBoundingClientRect();
@@ -495,7 +582,7 @@ export default function App() {
           </div>
         ) : (
           <div className="app__content" onMouseDown={handleContentMouseDown}>
-            <div className={pageCollectionClassName}>
+            <div ref={pageCollectionRef} className={pageCollectionClassName}>
               {pages.map((page, index) => {
                 const isSelected = selectedPageIds.has(page.id);
                 const sourceFile = sourceFiles[page.fileId];
