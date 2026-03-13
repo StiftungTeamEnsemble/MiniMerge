@@ -1,4 +1,10 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import {
+  startTransition,
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
 import type {
   ChangeEvent,
   DragEvent,
@@ -135,6 +141,9 @@ function moveSelectedPages(
   return reorderedPages;
 }
 
+const THUMBNAIL_FLUSH_INTERVAL_MS = 300;
+const THUMBNAIL_RENDER_BATCH_SIZE = 8;
+
 export default function App() {
   const [pages, setPages] = useState<PdfPageNode[]>([]);
   const [sourceFiles, setSourceFiles] = useState<Record<string, SourceFile>>(
@@ -159,6 +168,10 @@ export default function App() {
   const emptyFileInputRef = useRef<HTMLInputElement>(null);
   const pageCollectionRef = useRef<HTMLDivElement>(null);
   const pendingThumbnailPageIdsRef = useRef<Set<string>>(new Set());
+  const isThumbnailGenerationActiveRef = useRef(false);
+  const pagesRef = useRef<PdfPageNode[]>([]);
+
+  pagesRef.current = pages;
 
   const clearSelection = useCallback(() => {
     setSelectedPageIds(new Set());
@@ -261,7 +274,11 @@ export default function App() {
       return;
     }
 
-    const pagesNeedingThumbnails = pages.filter(
+    if (isThumbnailGenerationActiveRef.current) {
+      return;
+    }
+
+    const pagesNeedingThumbnails = pagesRef.current.filter(
       (page) =>
         !page.thumbnailUrl &&
         sourceFiles[page.fileId] &&
@@ -271,37 +288,118 @@ export default function App() {
       return;
     }
 
+    isThumbnailGenerationActiveRef.current = true;
     let isCancelled = false;
+    let processTimerId: number | null = null;
+    let flushIntervalId: number | null = null;
+    const stagedThumbnailUrlsByPageId: Record<string, string> = {};
+
     pagesNeedingThumbnails.forEach((page) => {
       pendingThumbnailPageIdsRef.current.add(page.id);
     });
 
-    void generatePageThumbnails(pagesNeedingThumbnails, sourceFiles)
-      .then((thumbnailUrlsByPageId) => {
-        if (isCancelled) {
-          Object.values(thumbnailUrlsByPageId).forEach((thumbnailUrl) => {
-            URL.revokeObjectURL(thumbnailUrl);
-          });
-          return;
-        }
+    const clearPendingPages = (targetPages: PdfPageNode[]) => {
+      targetPages.forEach((page) => {
+        pendingThumbnailPageIdsRef.current.delete(page.id);
+      });
+    };
 
+    const stopThumbnailGeneration = () => {
+      if (processTimerId !== null) {
+        window.clearTimeout(processTimerId);
+        processTimerId = null;
+      }
+
+      if (flushIntervalId !== null) {
+        window.clearInterval(flushIntervalId);
+        flushIntervalId = null;
+      }
+
+      isThumbnailGenerationActiveRef.current = false;
+    };
+
+    const revokeStagedThumbnails = () => {
+      Object.values(stagedThumbnailUrlsByPageId).forEach((thumbnailUrl) => {
+        URL.revokeObjectURL(thumbnailUrl);
+      });
+    };
+
+    const flushStagedThumbnails = () => {
+      const thumbnailUrlsByPageId = { ...stagedThumbnailUrlsByPageId };
+      const pageIds = Object.keys(thumbnailUrlsByPageId);
+      if (pageIds.length === 0) {
+        return;
+      }
+
+      pageIds.forEach((pageId) => {
+        delete stagedThumbnailUrlsByPageId[pageId];
+        pendingThumbnailPageIdsRef.current.delete(pageId);
+      });
+
+      startTransition(() => {
         setPages((prev) =>
           prev.map((page) => ({
             ...page,
             thumbnailUrl: thumbnailUrlsByPageId[page.id] ?? page.thumbnailUrl,
           })),
         );
-      })
-      .finally(() => {
-        pagesNeedingThumbnails.forEach((page) => {
-          pendingThumbnailPageIdsRef.current.delete(page.id);
-        });
       });
+    };
+
+    const processNextBatch = async (
+      remainingPages: PdfPageNode[],
+    ): Promise<void> => {
+      if (isCancelled) {
+        revokeStagedThumbnails();
+        clearPendingPages(remainingPages);
+        stopThumbnailGeneration();
+        return;
+      }
+
+      if (remainingPages.length === 0) {
+        flushStagedThumbnails();
+        stopThumbnailGeneration();
+        return;
+      }
+
+      const batch = remainingPages.slice(0, THUMBNAIL_RENDER_BATCH_SIZE);
+      const nextRemainingPages = remainingPages.slice(
+        THUMBNAIL_RENDER_BATCH_SIZE,
+      );
+      const thumbnailUrlsByPageId = await generatePageThumbnails(
+        batch,
+        sourceFiles,
+      );
+
+      if (isCancelled) {
+        Object.values(thumbnailUrlsByPageId).forEach((thumbnailUrl) => {
+          URL.revokeObjectURL(thumbnailUrl);
+        });
+        revokeStagedThumbnails();
+        clearPendingPages(remainingPages);
+        stopThumbnailGeneration();
+        return;
+      }
+
+      Object.assign(stagedThumbnailUrlsByPageId, thumbnailUrlsByPageId);
+
+      processTimerId = window.setTimeout(() => {
+        void processNextBatch(nextRemainingPages);
+      }, 0);
+    };
+
+    flushIntervalId = window.setInterval(() => {
+      flushStagedThumbnails();
+    }, THUMBNAIL_FLUSH_INTERVAL_MS);
+
+    processTimerId = window.setTimeout(() => {
+      void processNextBatch(pagesNeedingThumbnails);
+    }, 0);
 
     return () => {
       isCancelled = true;
     };
-  }, [pages, sourceFiles, viewMode]);
+  }, [pages.length, sourceFiles, viewMode]);
 
   const openEmptyFilePicker = useCallback(() => {
     if (!isProcessing) {
