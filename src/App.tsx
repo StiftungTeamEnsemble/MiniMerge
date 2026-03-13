@@ -36,7 +36,7 @@ function getSupportedDraggedFiles(dataTransfer: DataTransfer): File[] {
   return Array.from(dataTransfer.files).filter(isSupportedInputFile);
 }
 
-function getFileDropInsertionIndex(
+function getDropInsertionIndex(
   container: HTMLElement | null,
   viewMode: "grid" | "list",
   clientX: number,
@@ -280,7 +280,7 @@ export default function App() {
       e.dataTransfer.dropEffect = "copy";
       setIsDraggingFile(true);
 
-      const insertionIndex = getFileDropInsertionIndex(
+      const insertionIndex = getDropInsertionIndex(
         pageCollectionRef.current,
         viewMode,
         e.clientX,
@@ -465,7 +465,7 @@ export default function App() {
     if (hasFileDrag) {
       e.dataTransfer.dropEffect = "copy";
       setIsDraggingFile(true);
-      const insertionIndex = getFileDropInsertionIndex(
+      const insertionIndex = getDropInsertionIndex(
         pageCollectionRef.current,
         viewMode,
         e.clientX,
@@ -483,6 +483,35 @@ export default function App() {
 
     setDropInsertionIndex(insertBefore ? pageIndex : pageIndex + 1);
   };
+
+  const handlePageCollectionDragOver = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      const hasPageDrag = draggedPageId !== null;
+      const hasFileDrag = !hasPageDrag && isFileDrag(e.dataTransfer);
+      if (!hasPageDrag && !hasFileDrag) {
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (hasPageDrag) {
+        e.dataTransfer.dropEffect = "move";
+      } else {
+        e.dataTransfer.dropEffect = "copy";
+        setIsDraggingFile(true);
+      }
+
+      const insertionIndex = getDropInsertionIndex(
+        pageCollectionRef.current,
+        viewMode,
+        e.clientX,
+        e.clientY,
+      );
+      setDropInsertionIndex(insertionIndex ?? pages.length);
+    },
+    [draggedPageId, pages.length, viewMode],
+  );
 
   const handlePageDrop = useCallback(
     async (e: DragEvent<HTMLDivElement>) => {
@@ -611,7 +640,12 @@ export default function App() {
           </div>
         ) : (
           <div className="app__content" onMouseDown={handleContentMouseDown}>
-            <div ref={pageCollectionRef} className={pageCollectionClassName}>
+            <div
+              ref={pageCollectionRef}
+              className={pageCollectionClassName}
+              onDragOver={handlePageCollectionDragOver}
+              onDrop={handlePageDrop}
+            >
               {pages.map((page, index) => {
                 const isSelected = selectedPageIds.has(page.id);
                 const sourceFile = sourceFiles[page.fileId];
