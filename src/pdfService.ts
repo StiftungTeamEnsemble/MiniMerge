@@ -70,6 +70,28 @@ function createBlobUrl(
   );
 }
 
+function getPageLabel(page: mupdf.Page): string {
+  try {
+    return page.getLabel();
+  } catch {
+    return "";
+  }
+}
+
+function renderPdfPageThumbnail(page: mupdf.Page): string {
+  const scale = 0.5;
+  const matrix = mupdf.Matrix.scale(scale, scale);
+  const colorSpace = mupdf.ColorSpace.DeviceRGB;
+  const pixmap = page.toPixmap(matrix, colorSpace, false);
+
+  try {
+    const pngData = toBrowserUint8Array(pixmap.asPNG());
+    return createBlobUrl(pngData, PNG_MIME_TYPE);
+  } finally {
+    pixmap.destroy();
+  }
+}
+
 function formatPdfNumber(value: number): string {
   if (Number.isInteger(value)) {
     return String(value);
@@ -144,9 +166,6 @@ function parsePdfDocument(buffer: Uint8Array, fileId: string): PdfPageNode[] {
   try {
     const pages: PdfPageNode[] = [];
     const numPages = doc.countPages();
-    const scale = 0.5;
-    const matrix = mupdf.Matrix.scale(scale, scale);
-    const colorSpace = mupdf.ColorSpace.DeviceRGB;
 
     for (let i = 0; i < numPages; i += 1) {
       const page = doc.loadPage(i);
@@ -154,31 +173,15 @@ function parsePdfDocument(buffer: Uint8Array, fileId: string): PdfPageNode[] {
         const bounds = page.getBounds();
         const width = bounds[2] - bounds[0];
         const height = bounds[3] - bounds[1];
-        const pixmap = page.toPixmap(matrix, colorSpace, false);
-
-        try {
-          const pngData = toBrowserUint8Array(pixmap.asPNG());
-          const thumbnailUrl = createBlobUrl(pngData, PNG_MIME_TYPE);
-
-          let label = "";
-          try {
-            label = page.getLabel();
-          } catch {
-            label = "";
-          }
-
-          pages.push({
-            id: `${fileId}-p${i}`,
-            fileId,
-            pageIndex: i,
-            thumbnailUrl,
-            width,
-            height,
-            label,
-          });
-        } finally {
-          pixmap.destroy();
-        }
+        pages.push({
+          id: `${fileId}-p${i}`,
+          fileId,
+          pageIndex: i,
+          thumbnailUrl: null,
+          width,
+          height,
+          label: getPageLabel(page),
+        });
       } finally {
         page.destroy();
       }
@@ -192,7 +195,6 @@ function parsePdfDocument(buffer: Uint8Array, fileId: string): PdfPageNode[] {
 
 function parseImageDocument(
   buffer: Uint8Array,
-  mimeType: SupportedFileMimeType,
   fileId: string,
 ): PdfPageNode[] {
   const image = new mupdf.Image(buffer);
@@ -203,7 +205,7 @@ function parseImageDocument(
         id: `${fileId}-p0`,
         fileId,
         pageIndex: 0,
-        thumbnailUrl: createBlobUrl(buffer, mimeType),
+        thumbnailUrl: null,
         width: image.getWidth(),
         height: image.getHeight(),
         label: "1",
@@ -229,7 +231,7 @@ export async function parseInputFile(
   const pages =
     mimeType === PDF_MIME_TYPE
       ? parsePdfDocument(buffer, fileId)
-      : parseImageDocument(buffer, mimeType, fileId);
+      : parseImageDocument(buffer, fileId);
 
   const sourceFile: SourceFile = {
     id: fileId,
@@ -239,6 +241,56 @@ export async function parseInputFile(
   };
 
   return { sourceFile, pages };
+}
+
+export async function generatePageThumbnails(
+  pages: PdfPageNode[],
+  sourceFiles: Record<string, SourceFile>,
+): Promise<Record<string, string>> {
+  const openedDocs: Record<string, mupdf.Document> = {};
+
+  try {
+    const thumbnailUrlsByPageId: Record<string, string> = {};
+
+    for (const page of pages) {
+      if (page.thumbnailUrl) {
+        continue;
+      }
+
+      const sourceFile = sourceFiles[page.fileId];
+      if (!sourceFile) {
+        continue;
+      }
+
+      if (sourceFile.mimeType === PDF_MIME_TYPE) {
+        if (!openedDocs[page.fileId]) {
+          openedDocs[page.fileId] = mupdf.Document.openDocument(
+            sourceFile.buffer,
+            PDF_MIME_TYPE,
+          );
+        }
+
+        const pdfPage = openedDocs[page.fileId].loadPage(page.pageIndex);
+        try {
+          thumbnailUrlsByPageId[page.id] = renderPdfPageThumbnail(pdfPage);
+        } finally {
+          pdfPage.destroy();
+        }
+        continue;
+      }
+
+      thumbnailUrlsByPageId[page.id] = createBlobUrl(
+        sourceFile.buffer,
+        sourceFile.mimeType,
+      );
+    }
+
+    return thumbnailUrlsByPageId;
+  } finally {
+    for (const doc of Object.values(openedDocs)) {
+      doc.destroy();
+    }
+  }
 }
 
 export async function generateMergedPdf(

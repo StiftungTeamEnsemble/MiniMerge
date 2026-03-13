@@ -14,7 +14,7 @@ export interface PdfPageNode {
   id: string;
   fileId: string;
   pageIndex: number; // 0-based
-  thumbnailUrl: string; // generate via blob url
+  thumbnailUrl: string | null; // generated lazily for grid view
   width: number;
   height: number;
   label?: string; // from getLabel()

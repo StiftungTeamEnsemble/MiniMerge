@@ -16,6 +16,7 @@ import {
 import {
   FILE_INPUT_ACCEPT,
   generateMergedPdf,
+  generatePageThumbnails,
   isSupportedInputFile,
   parseInputFile,
 } from "./pdfService";
@@ -157,6 +158,7 @@ export default function App() {
   );
   const emptyFileInputRef = useRef<HTMLInputElement>(null);
   const pageCollectionRef = useRef<HTMLDivElement>(null);
+  const pendingThumbnailPageIdsRef = useRef<Set<string>>(new Set());
 
   const clearSelection = useCallback(() => {
     setSelectedPageIds(new Set());
@@ -253,6 +255,53 @@ export default function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleRemoveSelected, pages.length, selectAllPages, selectedPageIds]);
+
+  useEffect(() => {
+    if (viewMode !== "grid") {
+      return;
+    }
+
+    const pagesNeedingThumbnails = pages.filter(
+      (page) =>
+        !page.thumbnailUrl &&
+        sourceFiles[page.fileId] &&
+        !pendingThumbnailPageIdsRef.current.has(page.id),
+    );
+    if (pagesNeedingThumbnails.length === 0) {
+      return;
+    }
+
+    let isCancelled = false;
+    pagesNeedingThumbnails.forEach((page) => {
+      pendingThumbnailPageIdsRef.current.add(page.id);
+    });
+
+    void generatePageThumbnails(pagesNeedingThumbnails, sourceFiles)
+      .then((thumbnailUrlsByPageId) => {
+        if (isCancelled) {
+          Object.values(thumbnailUrlsByPageId).forEach((thumbnailUrl) => {
+            URL.revokeObjectURL(thumbnailUrl);
+          });
+          return;
+        }
+
+        setPages((prev) =>
+          prev.map((page) => ({
+            ...page,
+            thumbnailUrl: thumbnailUrlsByPageId[page.id] ?? page.thumbnailUrl,
+          })),
+        );
+      })
+      .finally(() => {
+        pagesNeedingThumbnails.forEach((page) => {
+          pendingThumbnailPageIdsRef.current.delete(page.id);
+        });
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [pages, sourceFiles, viewMode]);
 
   const openEmptyFilePicker = useCallback(() => {
     if (!isProcessing) {
@@ -711,12 +760,18 @@ export default function App() {
                             aspectRatio: `${page.width} / ${page.height}`,
                           }}
                         >
-                          <img
-                            src={page.thumbnailUrl}
-                            alt={`Page ${page.pageIndex + 1}`}
-                            className="page-card__preview-image"
-                            draggable={false}
-                          />
+                          {page.thumbnailUrl ? (
+                            <img
+                              src={page.thumbnailUrl}
+                              alt={`Page ${page.pageIndex + 1}`}
+                              className="page-card__preview-image"
+                              draggable={false}
+                            />
+                          ) : (
+                            <div className="page-card__preview-placeholder">
+                              Loading preview...
+                            </div>
+                          )}
                           <div className="page-card__preview-hover" />
                         </div>
                         <div className="page-card__label">
@@ -732,29 +787,14 @@ export default function App() {
                         </div>
                       </>
                     ) : (
-                      <>
-                        <div
-                          className="page-card__list-preview"
-                          style={{
-                            aspectRatio: `${page.width} / ${page.height}`,
-                          }}
-                        >
-                          <img
-                            src={page.thumbnailUrl}
-                            alt="Thumbnail"
-                            className="page-card__preview-image"
-                            draggable={false}
-                          />
+                      <div className="page-card__meta">
+                        <div className="page-card__meta-title">
+                          {sourceFile?.name}
                         </div>
-                        <div className="page-card__meta">
-                          <div className="page-card__meta-title">
-                            {sourceFile?.name}
-                          </div>
-                          <div className="page-card__meta-subtitle">
-                            Page {page.label ? page.label : page.pageIndex + 1}
-                          </div>
+                        <div className="page-card__meta-subtitle">
+                          Page {page.label ? page.label : page.pageIndex + 1}
                         </div>
-                      </>
+                      </div>
                     )}
                   </div>
                 );
