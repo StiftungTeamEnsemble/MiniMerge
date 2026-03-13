@@ -362,7 +362,8 @@ export default function App() {
       dragPointerRef.current = { clientX, clientY };
 
       if (autoScrollFrameRef.current === null) {
-        autoScrollFrameRef.current = window.requestAnimationFrame(runAutoScroll);
+        autoScrollFrameRef.current =
+          window.requestAnimationFrame(runAutoScroll);
       }
     },
     [runAutoScroll],
@@ -876,8 +877,9 @@ export default function App() {
         // Safari may refuse pointer capture in some touch cases.
       }
 
-      const otherActiveTouch = Array.from(activeTouchPointersRef.current.entries())
-        .find(([pointerId]) => pointerId !== e.pointerId);
+      const otherActiveTouch = Array.from(
+        activeTouchPointersRef.current.entries(),
+      ).find(([pointerId]) => pointerId !== e.pointerId);
 
       if (otherActiveTouch) {
         const [, anchorPageId] = otherActiveTouch;
@@ -984,7 +986,12 @@ export default function App() {
         // Ignore missing capture on browsers with partial support.
       }
     },
-    [dropInsertionIndex, resetDragState, selectedPageIds, suppressUpcomingClick],
+    [
+      dropInsertionIndex,
+      resetDragState,
+      selectedPageIds,
+      suppressUpcomingClick,
+    ],
   );
 
   const handleContentMouseDown = useCallback(
