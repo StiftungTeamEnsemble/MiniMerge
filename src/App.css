@@ -306,7 +306,7 @@
   display: grid;
   gap: var(--grid-gap);
   justify-content: center;
-  grid-template-columns: repeat(auto-fit, minmax(100px, 160px));
+  grid-template-columns: repeat(auto-fit, 100px);
 }
 
 .app__pages--list {
