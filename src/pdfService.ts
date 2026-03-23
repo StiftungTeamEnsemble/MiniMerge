@@ -5,6 +5,34 @@ const PDF_MIME_TYPE = "application/pdf";
 const JPEG_MIME_TYPE = "image/jpeg";
 const PNG_MIME_TYPE = "image/png";
 const PDF_GENERATOR_URL = "https://minimerge.signalwerk.ch/";
+const SRGB_PROFILE_URL = "/color-profiles/sRGB-IEC61966-2.1.icc";
+const SRGB_PROFILE_NAME = "sRGB IEC61966-2.1";
+
+export type ImageExportFormat = "png" | "jpeg";
+export type ImageExportColorSpace = "gray" | "srgb";
+export type ImageExportSizeMode = "dpi" | "width" | "height";
+
+export interface ImageExportOptions {
+  format: ImageExportFormat;
+  colorSpace: ImageExportColorSpace;
+  sizeMode: ImageExportSizeMode;
+  value: number;
+  jpegQuality?: number;
+}
+
+export interface ExportedPageImage {
+  pageId: string;
+  fileName: string;
+  mimeType: SupportedFileMimeType;
+  width: number;
+  height: number;
+  buffer: Uint8Array<ArrayBuffer>;
+}
+
+interface ResolvedExportColorSpace {
+  colorSpace: mupdf.ColorSpace;
+  needsDestroy: boolean;
+}
 
 export const FILE_INPUT_ACCEPT =
   ".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg";
@@ -24,6 +52,15 @@ function getFileExtension(name: string): string {
   }
 
   return name.slice(dotIndex).toLowerCase();
+}
+
+function getFileBaseName(name: string): string {
+  const dotIndex = name.lastIndexOf(".");
+  if (dotIndex === -1) {
+    return name;
+  }
+
+  return name.slice(0, dotIndex);
 }
 
 export function getSupportedMimeType(
@@ -69,6 +106,151 @@ function createBlobUrl(
   return URL.createObjectURL(
     new Blob([toBrowserUint8Array(buffer)], { type: mimeType }),
   );
+}
+
+function sanitizeFilePart(value: string): string {
+  return value
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+}
+
+function getExportFileExtension(format: ImageExportFormat): "png" | "jpg" {
+  switch (format) {
+    case "jpeg":
+      return "jpg";
+    case "png":
+    default:
+      return "png";
+  }
+}
+
+function getExportMimeType(format: ImageExportFormat): SupportedFileMimeType {
+  switch (format) {
+    case "jpeg":
+      return JPEG_MIME_TYPE;
+    case "png":
+    default:
+      return PNG_MIME_TYPE;
+  }
+}
+
+export function getImageExportFormatsForColorSpace(
+  colorSpace: ImageExportColorSpace,
+): ImageExportFormat[] {
+  void colorSpace;
+  return ["png", "jpeg"];
+}
+
+export function getImageExportColorSpaceStatus(
+  colorSpace: ImageExportColorSpace,
+): { message: string | null } {
+  switch (colorSpace) {
+    case "srgb":
+      return {
+        message: "Rendered in the sRGB IEC61966-2.1 profile.",
+      };
+    case "gray":
+    default:
+      return {
+        message: "Rendered as grayscale.",
+      };
+  }
+}
+
+const colorProfileCache = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
+
+async function loadColorProfile(url: string): Promise<Uint8Array<ArrayBuffer>> {
+  const existingProfile = colorProfileCache.get(url);
+  if (existingProfile) {
+    return existingProfile;
+  }
+
+  const profilePromise = fetch(url)
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Failed to load ICC profile: ${url}`);
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      return new Uint8Array(arrayBuffer);
+    })
+    .catch((error) => {
+      colorProfileCache.delete(url);
+      throw error;
+    });
+
+  colorProfileCache.set(url, profilePromise);
+  return profilePromise;
+}
+
+async function resolveExportColorSpace(
+  exportColorSpace: ImageExportColorSpace,
+): Promise<ResolvedExportColorSpace> {
+  switch (exportColorSpace) {
+    case "gray":
+      return {
+        colorSpace: mupdf.ColorSpace.DeviceGray,
+        needsDestroy: false,
+      };
+    case "srgb": {
+      const profile = await loadColorProfile(SRGB_PROFILE_URL);
+      return {
+        colorSpace: new mupdf.ColorSpace(profile, SRGB_PROFILE_NAME),
+        needsDestroy: true,
+      };
+    }
+    default:
+      return {
+        colorSpace: mupdf.ColorSpace.DeviceRGB,
+        needsDestroy: false,
+      };
+  }
+}
+
+function getRasterScale(
+  sizeMode: ImageExportSizeMode,
+  value: number,
+  pageWidth: number,
+  pageHeight: number,
+): number {
+  switch (sizeMode) {
+    case "dpi":
+      return value / 72;
+    case "width":
+      return value / pageWidth;
+    case "height":
+      return value / pageHeight;
+    default:
+      return 1;
+  }
+}
+
+function getEffectiveResolution(
+  sizeMode: ImageExportSizeMode,
+  value: number,
+  scale: number,
+): number {
+  if (sizeMode === "dpi") {
+    return value;
+  }
+
+  return Math.max(1, Math.round(scale * 72));
+}
+
+function getExportFileName(
+  page: PdfPageNode,
+  pageIndex: number,
+  sourceFile: SourceFile,
+  format: ImageExportFormat,
+): string {
+  const fileBaseName = sanitizeFilePart(getFileBaseName(sourceFile.name));
+  const pageLabel = sanitizeFilePart(page.label || `page-${page.pageIndex + 1}`);
+  const extension = getExportFileExtension(format);
+  return `${String(pageIndex + 1).padStart(3, "0")}-${fileBaseName}-${pageLabel}.${extension}`;
 }
 
 function getPageLabel(page: mupdf.Page): string {
@@ -364,6 +546,95 @@ export async function generateMergedPdf(
     const outBuffer = finalPdf.saveToBuffer("");
     return toBrowserUint8Array(outBuffer.asUint8Array());
   } finally {
+    for (const doc of Object.values(openedDocs)) {
+      doc.destroy();
+    }
+  }
+}
+
+export async function exportPagesAsImages(
+  pages: PdfPageNode[],
+  sourceFiles: Record<string, SourceFile>,
+  options: ImageExportOptions,
+): Promise<ExportedPageImage[]> {
+  const openedDocs: Record<string, mupdf.Document> = {};
+  const availableFormats = getImageExportFormatsForColorSpace(options.colorSpace);
+
+  if (!availableFormats.includes(options.format)) {
+    throw new Error(
+      `The ${options.colorSpace} export mode only supports ${availableFormats.join(", ")}.`,
+    );
+  }
+
+  const resolvedColorSpace = await resolveExportColorSpace(options.colorSpace);
+
+  try {
+    const exportedImages: ExportedPageImage[] = [];
+
+    for (const [index, pageNode] of pages.entries()) {
+      const sourceFile = sourceFiles[pageNode.fileId];
+      if (!sourceFile) {
+        continue;
+      }
+
+      if (!openedDocs[pageNode.fileId]) {
+        openedDocs[pageNode.fileId] = mupdf.Document.openDocument(
+          sourceFile.buffer,
+          sourceFile.mimeType,
+        );
+      }
+
+      const sourcePage = openedDocs[pageNode.fileId].loadPage(pageNode.pageIndex);
+      try {
+        const bounds = sourcePage.getBounds();
+        const pageWidth = bounds[2] - bounds[0];
+        const pageHeight = bounds[3] - bounds[1];
+        const scale = getRasterScale(
+          options.sizeMode,
+          options.value,
+          pageWidth,
+          pageHeight,
+        );
+        const renderMatrix = mupdf.Matrix.scale(scale, scale);
+        const pixmap = sourcePage.toPixmap(renderMatrix, resolvedColorSpace.colorSpace, false);
+
+        try {
+          const effectiveResolution = getEffectiveResolution(
+            options.sizeMode,
+            options.value,
+            scale,
+          );
+          pixmap.setResolution(effectiveResolution, effectiveResolution);
+
+          const imageBuffer =
+            options.format === "png"
+              ? toBrowserUint8Array(pixmap.asPNG())
+              : toBrowserUint8Array(
+                  pixmap.asJPEG(options.jpegQuality ?? 82),
+                );
+
+          exportedImages.push({
+            pageId: pageNode.id,
+            fileName: getExportFileName(pageNode, index, sourceFile, options.format),
+            mimeType: getExportMimeType(options.format),
+            width: pixmap.getWidth(),
+            height: pixmap.getHeight(),
+            buffer: imageBuffer,
+          });
+        } finally {
+          pixmap.destroy();
+        }
+      } finally {
+        sourcePage.destroy();
+      }
+    }
+
+    return exportedImages;
+  } finally {
+    if (resolvedColorSpace.needsDestroy) {
+      resolvedColorSpace.colorSpace.destroy();
+    }
+
     for (const doc of Object.values(openedDocs)) {
       doc.destroy();
     }

@@ -8,28 +8,41 @@ import {
 import type {
   ChangeEvent,
   DragEvent,
+  FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
 import {
+  Command,
   Upload,
   Grid as GridIcon,
   List as ListIcon,
   Download,
+  ImageDown,
   Trash2,
   FileText,
   X,
 } from "lucide-react";
 import {
   FILE_INPUT_ACCEPT,
+  exportPagesAsImages,
   generateMergedPdf,
+  getImageExportColorSpaceStatus,
+  getImageExportFormatsForColorSpace,
   generatePagePreview,
   generatePageThumbnails,
   isSupportedInputFile,
   parseInputFile,
 } from "./pdfService";
+import type {
+  ImageExportColorSpace,
+  ImageExportFormat,
+  ImageExportOptions,
+  ImageExportSizeMode,
+} from "./pdfService";
 import type { PdfPageNode, SourceFile } from "./types";
+import { buildZipArchive } from "./zipService";
 import "./App.css";
 
 function clampInsertionIndex(index: number, length: number): number {
@@ -149,6 +162,114 @@ const THUMBNAIL_RENDER_BATCH_SIZE = 8;
 const TOUCH_DRAG_THRESHOLD_PX = 10;
 const AUTO_SCROLL_EDGE_PX = 96;
 const AUTO_SCROLL_MAX_SPEED_PX = 24;
+const DOWNLOAD_SELECTED_PAGES_COMMAND = "download-selected-pages-as-images";
+
+interface ImageExportFormState {
+  colorSpace: ImageExportColorSpace;
+  format: ImageExportFormat;
+  sizeMode: ImageExportSizeMode;
+  value: string;
+  jpegQualityPreset: "low" | "medium" | "high" | "custom";
+  jpegQualityCustomValue: string;
+}
+
+const DEFAULT_IMAGE_EXPORT_FORM: ImageExportFormState = {
+  colorSpace: "srgb",
+  format: "png",
+  sizeMode: "dpi",
+  value: "150",
+  jpegQualityPreset: "medium",
+  jpegQualityCustomValue: "82",
+};
+
+function parsePositiveNumber(value: string): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
+function getImageExportArchiveName(format: ImageExportFormat): string {
+  return `selected-pages-${format}-export.zip`;
+}
+
+function getImageExportFormatLabel(format: ImageExportFormat): string {
+  switch (format) {
+    case "jpeg":
+      return "JPEG";
+    case "png":
+    default:
+      return "PNG";
+  }
+}
+
+function getImageExportColorSpaceLabel(colorSpace: ImageExportColorSpace): string {
+  switch (colorSpace) {
+    case "gray":
+      return "Gray";
+    case "srgb":
+    default:
+      return "sRGB";
+  }
+}
+
+function getJpegQualityPresetValue(
+  preset: ImageExportFormState["jpegQualityPreset"],
+): number | null {
+  switch (preset) {
+    case "low":
+      return 60;
+    case "medium":
+      return 82;
+    case "high":
+      return 92;
+    case "custom":
+    default:
+      return null;
+  }
+}
+
+function getSizeModeLabel(sizeMode: ImageExportSizeMode): string {
+  switch (sizeMode) {
+    case "width":
+      return "Target width (px)";
+    case "height":
+      return "Target height (px)";
+    case "dpi":
+    default:
+      return "Resolution (dpi)";
+  }
+}
+
+function getSizeModeHint(sizeMode: ImageExportSizeMode): string {
+  switch (sizeMode) {
+    case "width":
+      return "Each page gets this width. Height is calculated automatically.";
+    case "height":
+      return "Each page gets this height. Width is calculated automatically.";
+    case "dpi":
+    default:
+      return "Pixel dimensions are calculated from each page size at this DPI.";
+  }
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
+}
 
 export default function App() {
   const [pages, setPages] = useState<PdfPageNode[]>([]);
@@ -165,7 +286,9 @@ export default function App() {
   const [selectionAnchorSnapshotIds, setSelectionAnchorSnapshotIds] = useState<
     Set<string>
   >(new Set());
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingTask, setProcessingTask] = useState<
+    "files" | "merge-pdf" | "export-images" | null
+  >(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [draggedPageId, setDraggedPageId] = useState<string | null>(null);
   const [dropInsertionIndex, setDropInsertionIndex] = useState<number | null>(
@@ -174,7 +297,16 @@ export default function App() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
+  const [isImageExportDialogOpen, setIsImageExportDialogOpen] = useState(false);
+  const [imageExportForm, setImageExportForm] = useState<ImageExportFormState>(
+    DEFAULT_IMAGE_EXPORT_FORM,
+  );
+  const [imageExportError, setImageExportError] = useState<string | null>(null);
   const emptyFileInputRef = useRef<HTMLInputElement>(null);
+  const commandPaletteInputRef = useRef<HTMLInputElement>(null);
+  const imageExportValueInputRef = useRef<HTMLInputElement>(null);
   const pageCollectionRef = useRef<HTMLDivElement>(null);
   const pendingThumbnailPageIdsRef = useRef<Set<string>>(new Set());
   const isThumbnailGenerationActiveRef = useRef(false);
@@ -207,6 +339,14 @@ export default function App() {
     selectedSinglePageId !== null
       ? (pages.find((page) => page.id === selectedSinglePageId) ?? null)
       : null;
+  const selectedPages = pages.filter((page) => selectedPageIds.has(page.id));
+  const isProcessing = processingTask !== null;
+  const availableImageExportFormats = getImageExportFormatsForColorSpace(
+    imageExportForm.colorSpace,
+  );
+  const imageExportColorSpaceStatus = getImageExportColorSpaceStatus(
+    imageExportForm.colorSpace,
+  );
 
   const selectSinglePage = useCallback((pageId: string) => {
     const nextSelectedIds = new Set([pageId]);
@@ -269,6 +409,67 @@ export default function App() {
       setIsPreviewOpen(true);
     },
     [selectSinglePage],
+  );
+
+  const closeCommandPalette = useCallback(() => {
+    setIsCommandPaletteOpen(false);
+    setCommandPaletteQuery("");
+  }, []);
+
+  const closeImageExportDialog = useCallback(() => {
+    setIsImageExportDialogOpen(false);
+    setImageExportError(null);
+  }, []);
+
+  const openCommandPalette = useCallback(() => {
+    setImageExportError(null);
+    setIsImageExportDialogOpen(false);
+    setIsCommandPaletteOpen(true);
+  }, []);
+
+  const openImageExportDialog = useCallback(() => {
+    if (selectedPages.length === 0) {
+      return;
+    }
+
+    setImageExportError(null);
+    setIsCommandPaletteOpen(false);
+    setCommandPaletteQuery("");
+    setIsImageExportDialogOpen(true);
+  }, [selectedPages.length]);
+
+  const commandPaletteCommands = [
+    {
+      id: DOWNLOAD_SELECTED_PAGES_COMMAND,
+      title: "Download selected pages as images",
+      description:
+        selectedPages.length > 0
+          ? `Export ${selectedPages.length} selected page${selectedPages.length === 1 ? "" : "s"} with format, profile and resolution controls.`
+          : "Select one or more pages to enable this export command.",
+      disabled: selectedPages.length === 0,
+    },
+  ];
+
+  const filteredCommandPaletteCommands = commandPaletteCommands.filter(
+    (command) => {
+      const query = commandPaletteQuery.trim().toLowerCase();
+      if (!query) {
+        return true;
+      }
+
+      return `${command.title} ${command.description}`
+        .toLowerCase()
+        .includes(query);
+    },
+  );
+
+  const handleRunCommand = useCallback(
+    (commandId: string) => {
+      if (commandId === DOWNLOAD_SELECTED_PAGES_COMMAND) {
+        openImageExportDialog();
+      }
+    },
+    [openImageExportDialog],
   );
 
   const navigateSingleSelection = useCallback(
@@ -382,7 +583,7 @@ export default function App() {
         return;
       }
 
-      setIsProcessing(true);
+      setProcessingTask("files");
       try {
         const newFiles: Record<string, SourceFile> = {};
         const newPages: PdfPageNode[] = [];
@@ -408,7 +609,7 @@ export default function App() {
         console.error("Error processing files:", err);
         alert("Error parsing PDF/image files. Check console for details.");
       } finally {
-        setIsProcessing(false);
+        setProcessingTask(null);
       }
     },
     [],
@@ -431,18 +632,46 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLSelectElement ||
-        (e.target instanceof HTMLElement && e.target.isContentEditable)
-      ) {
+      const isCommandShortcut =
+        (e.metaKey || e.ctrlKey) &&
+        !e.altKey &&
+        e.key.toLowerCase() === "k";
+
+      if (isCommandShortcut) {
+        e.preventDefault();
+        if (isCommandPaletteOpen) {
+          closeCommandPalette();
+        } else {
+          openCommandPalette();
+        }
         return;
       }
 
-      if (e.key === "Escape" && isPreviewOpen) {
-        e.preventDefault();
-        closePreview();
+      if (e.key === "Escape") {
+        if (isImageExportDialogOpen) {
+          e.preventDefault();
+          closeImageExportDialog();
+          return;
+        }
+
+        if (isCommandPaletteOpen) {
+          e.preventDefault();
+          closeCommandPalette();
+          return;
+        }
+
+        if (isPreviewOpen) {
+          e.preventDefault();
+          closePreview();
+          return;
+        }
+      }
+
+      if (isImageExportDialogOpen || isCommandPaletteOpen) {
+        return;
+      }
+
+      if (isEditableTarget(e.target)) {
         return;
       }
 
@@ -511,17 +740,39 @@ export default function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
+    closeCommandPalette,
+    closeImageExportDialog,
     closePreview,
     handleRemoveSelected,
+    isCommandPaletteOpen,
+    isImageExportDialogOpen,
     isPreviewOpen,
     navigateSingleSelection,
+    openCommandPalette,
     openPreview,
-    openPreviewForPage,
     pages.length,
     selectAllPages,
     selectedPageIds,
     selectedSinglePageId,
   ]);
+
+  useEffect(() => {
+    if (!isCommandPaletteOpen) {
+      return;
+    }
+
+    commandPaletteInputRef.current?.focus();
+    commandPaletteInputRef.current?.select();
+  }, [isCommandPaletteOpen]);
+
+  useEffect(() => {
+    if (!isImageExportDialogOpen) {
+      return;
+    }
+
+    imageExportValueInputRef.current?.focus();
+    imageExportValueInputRef.current?.select();
+  }, [isImageExportDialogOpen]);
 
   useEffect(() => {
     if (isPreviewOpen && !selectedSinglePage) {
@@ -860,6 +1111,155 @@ export default function App() {
     setSelectedPageIds(nextSelectedIds);
   };
 
+  const handleCommandPaletteInputKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLInputElement>) => {
+      if (e.key !== "Enter") {
+        return;
+      }
+
+      const firstEnabledCommand = filteredCommandPaletteCommands.find(
+        (command) => !command.disabled,
+      );
+      if (!firstEnabledCommand) {
+        return;
+      }
+
+      e.preventDefault();
+      handleRunCommand(firstEnabledCommand.id);
+    },
+    [filteredCommandPaletteCommands, handleRunCommand],
+  );
+
+  const handleImageExportFieldChange = useCallback(
+    <K extends keyof ImageExportFormState>(
+      key: K,
+      value: ImageExportFormState[K],
+    ) => {
+      setImageExportError(null);
+      setImageExportForm((prev) => {
+        if (key === "colorSpace") {
+          const nextColorSpace = value as ImageExportColorSpace;
+          const nextFormats = getImageExportFormatsForColorSpace(nextColorSpace);
+          return {
+            ...prev,
+            colorSpace: nextColorSpace,
+            format: nextFormats.includes(prev.format) ? prev.format : nextFormats[0],
+          };
+        }
+
+        if (key === "format") {
+          return {
+            ...prev,
+            format: value as ImageExportFormat,
+          };
+        }
+
+        return {
+          ...prev,
+          [key]: value,
+        };
+      });
+    },
+    [],
+  );
+
+  const handleImageExportSubmit = useCallback(
+    async (e: FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+
+      const exportValue = parsePositiveNumber(imageExportForm.value);
+      if (!exportValue) {
+        setImageExportError("Enter a value greater than 0.");
+        return;
+      }
+
+      if (selectedPages.length === 0) {
+        setImageExportError("Select one or more pages before exporting.");
+        return;
+      }
+
+      let jpegQuality: number | undefined;
+      if (imageExportForm.format === "jpeg") {
+        const presetQuality = getJpegQualityPresetValue(
+          imageExportForm.jpegQualityPreset,
+        );
+        const resolvedQuality =
+          presetQuality ??
+          parsePositiveNumber(imageExportForm.jpegQualityCustomValue);
+
+        if (
+          !resolvedQuality ||
+          !Number.isFinite(resolvedQuality) ||
+          resolvedQuality < 1 ||
+          resolvedQuality > 100
+        ) {
+          setImageExportError("JPEG custom quality must be between 1 and 100.");
+          return;
+        }
+
+        jpegQuality = Math.round(resolvedQuality);
+      }
+
+      const exportOptions: ImageExportOptions = {
+        colorSpace: imageExportForm.colorSpace,
+        format: imageExportForm.format,
+        sizeMode: imageExportForm.sizeMode,
+        value: exportValue,
+        jpegQuality,
+      };
+
+      setProcessingTask("export-images");
+      try {
+        const exportedImages = await exportPagesAsImages(
+          selectedPages,
+          sourceFiles,
+          exportOptions,
+        );
+
+        if (exportedImages.length === 0) {
+          throw new Error("No images were exported.");
+        }
+
+        if (exportedImages.length === 1) {
+          const [singleImage] = exportedImages;
+          downloadBlob(
+            new Blob([singleImage.buffer], { type: singleImage.mimeType }),
+            singleImage.fileName,
+          );
+        } else {
+          const zipBuffer = buildZipArchive(
+            exportedImages.map((image) => ({
+              name: image.fileName,
+              data: image.buffer,
+            })),
+          );
+
+          downloadBlob(
+            new Blob([zipBuffer], { type: "application/zip" }),
+            getImageExportArchiveName(imageExportForm.format),
+          );
+        }
+
+        closeImageExportDialog();
+      } catch (err) {
+        console.error("Error exporting selected pages:", err);
+        setImageExportError(
+          err instanceof Error
+            ? err.message
+            : "Error exporting selected pages as images.",
+        );
+      } finally {
+        setProcessingTask(null);
+      }
+    },
+    [
+      closeImageExportDialog,
+      imageExportForm,
+      selectedPages,
+      sourceFiles,
+    ],
+  );
+
   const handlePagePointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>, pageId: string) => {
       if (e.pointerType !== "touch") {
@@ -1011,25 +1411,22 @@ export default function App() {
   );
 
   const handleDownload = async () => {
-    if (pages.length === 0) return;
+    if (pages.length === 0) {
+      return;
+    }
 
-    setIsProcessing(true);
+    setProcessingTask("merge-pdf");
     try {
       const mergedPdfUint8Array = await generateMergedPdf(pages, sourceFiles);
-      const blob = new Blob([mergedPdfUint8Array], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = "merged.pdf";
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      URL.revokeObjectURL(url);
+      downloadBlob(
+        new Blob([mergedPdfUint8Array], { type: "application/pdf" }),
+        "merged.pdf",
+      );
     } catch (err) {
       console.error("Error merging PDF:", err);
       alert("Error generating merged PDF.");
     } finally {
-      setIsProcessing(false);
+      setProcessingTask(null);
     }
   };
 
@@ -1174,6 +1571,17 @@ export default function App() {
             </button>
           </div>
           <div className="app__divider" />
+          {/* <button
+            type="button"
+            onClick={openCommandPalette}
+            disabled={isProcessing}
+            className="app__action app__action--subtle"
+            title="Open command palette (Cmd/Ctrl+K)"
+          >
+            <Command className="app__action-icon" />
+            Commands
+            <span className="app__action-shortcut">Cmd/Ctrl+K</span>
+          </button> */}
           <button
             type="button"
             onClick={handleRemoveSelected}
@@ -1190,7 +1598,7 @@ export default function App() {
             className="app__action app__action--primary"
           >
             <Download className="app__action-icon" />
-            {isProcessing ? "Processing..." : "Merge PDF"}
+            {processingTask === "merge-pdf" ? "Merging..." : "Merge PDF"}
           </button>
         </div>
       </header>
@@ -1204,7 +1612,7 @@ export default function App() {
             role="button"
             tabIndex={0}
           >
-            {isProcessing ? (
+            {processingTask === "files" ? (
               <div className="dropzone__processing">Processing files...</div>
             ) : (
               <>
@@ -1358,57 +1766,323 @@ export default function App() {
                 onChange={handleFileInput}
               />
             </label>
-
-            {isPreviewOpen && selectedSinglePage && (
-              <div className="preview-modal" role="dialog" aria-modal="true">
-                <div
-                  className="preview-modal__backdrop"
-                  onClick={closePreview}
-                />
-                <div className="preview-modal__panel">
-                  <button
-                    type="button"
-                    className="preview-modal__close"
-                    onClick={closePreview}
-                    aria-label="Close preview"
-                  >
-                    <X className="preview-modal__close-icon" />
-                  </button>
-                  <div className="preview-modal__meta">
-                    <div className="preview-modal__title">
-                      {sourceFiles[selectedSinglePage.fileId]?.name}
-                    </div>
-                    <div className="preview-modal__subtitle">
-                      Page{" "}
-                      {selectedSinglePage.label
-                        ? selectedSinglePage.label
-                        : selectedSinglePage.pageIndex + 1}
-                    </div>
-                  </div>
-                  <div className="preview-modal__viewport">
-                    {previewImageUrl ? (
-                      <img
-                        src={previewImageUrl}
-                        alt={`Preview of page ${selectedSinglePage.pageIndex + 1}`}
-                        className="preview-modal__image"
-                      />
-                    ) : (
-                      <div className="preview-modal__loading">
-                        Loading preview...
-                      </div>
-                    )}
-                    {isPreviewLoading && (
-                      <div className="preview-modal__status">
-                        Rendering preview...
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
       </main>
+
+      {isCommandPaletteOpen && (
+        <div className="overlay-shell" role="presentation" onClick={closeCommandPalette}>
+          <div
+            className="command-palette"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Command palette"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="command-palette__search">
+              <Command className="command-palette__search-icon" />
+              <input
+                ref={commandPaletteInputRef}
+                type="text"
+                value={commandPaletteQuery}
+                onChange={(e) => setCommandPaletteQuery(e.target.value)}
+                onKeyDown={handleCommandPaletteInputKeyDown}
+                className="command-palette__input"
+                placeholder="Type a command"
+              />
+            </div>
+            <div className="command-palette__results">
+              {filteredCommandPaletteCommands.length > 0 ? (
+                filteredCommandPaletteCommands.map((command) => (
+                  <button
+                    key={command.id}
+                    type="button"
+                    disabled={command.disabled}
+                    className="command-palette__item"
+                    onClick={() => handleRunCommand(command.id)}
+                  >
+                    <div className="command-palette__item-icon">
+                      <ImageDown className="command-palette__item-icon-svg" />
+                    </div>
+                    <div className="command-palette__item-copy">
+                      <div className="command-palette__item-title">
+                        {command.title}
+                      </div>
+                      <div className="command-palette__item-description">
+                        {command.description}
+                      </div>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <div className="command-palette__empty">
+                  No commands match “{commandPaletteQuery}”.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isImageExportDialogOpen && (
+        <div
+          className="overlay-shell"
+          role="presentation"
+          onClick={closeImageExportDialog}
+        >
+          <div
+            className="export-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="export-dialog-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="export-dialog__header">
+              <div>
+                <h2 id="export-dialog-title" className="export-dialog__title">
+                  Export selected pages
+                </h2>
+                <p className="export-dialog__subtitle">
+                  {selectedPages.length} selected page
+                  {selectedPages.length === 1 ? "" : "s"}. Aspect ratio is
+                  always preserved.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="preview-modal__close"
+                onClick={closeImageExportDialog}
+                aria-label="Close export dialog"
+              >
+                <X className="preview-modal__close-icon" />
+              </button>
+            </div>
+
+            <form className="export-dialog__form" onSubmit={handleImageExportSubmit}>
+              <div className="export-dialog__grid">
+                <label className="export-field">
+                  <span className="export-field__label">Colour output</span>
+                  <select
+                    value={imageExportForm.colorSpace}
+                    onChange={(e) =>
+                      handleImageExportFieldChange(
+                        "colorSpace",
+                        e.target.value as ImageExportColorSpace,
+                      )
+                    }
+                    className="export-field__control"
+                  >
+                    <option value="gray">Gray</option>
+                    <option value="srgb">sRGB</option>
+                  </select>
+                </label>
+
+                <label className="export-field">
+                  <span className="export-field__label">File format</span>
+                  <select
+                    value={imageExportForm.format}
+                    onChange={(e) =>
+                      handleImageExportFieldChange(
+                        "format",
+                        e.target.value as ImageExportFormat,
+                      )
+                    }
+                    className="export-field__control"
+                  >
+                    {availableImageExportFormats.map((format) => (
+                      <option key={format} value={format}>
+                        {getImageExportFormatLabel(format)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              {imageExportColorSpaceStatus.message && (
+                <div className="export-dialog__meta">
+                  <strong>{getImageExportColorSpaceLabel(imageExportForm.colorSpace)}:</strong>{" "}
+                  {imageExportColorSpaceStatus.message}
+                </div>
+              )}
+
+              <div className="export-field">
+                <span className="export-field__label">Resolution mode</span>
+                <div className="export-mode-group" role="group" aria-label="Resolution mode">
+                  {(["dpi", "width", "height"] as const).map((sizeMode) => (
+                    <button
+                      key={sizeMode}
+                      type="button"
+                      className={`export-mode-group__button ${imageExportForm.sizeMode === sizeMode ? "export-mode-group__button--active" : ""}`}
+                      onClick={() => handleImageExportFieldChange("sizeMode", sizeMode)}
+                    >
+                      {sizeMode === "dpi"
+                        ? "DPI"
+                        : sizeMode === "width"
+                          ? "Width"
+                          : "Height"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label className="export-field">
+                <span className="export-field__label">
+                  {getSizeModeLabel(imageExportForm.sizeMode)}
+                </span>
+                <input
+                  ref={imageExportValueInputRef}
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputMode="numeric"
+                  value={imageExportForm.value}
+                  onChange={(e) =>
+                    handleImageExportFieldChange("value", e.target.value)
+                  }
+                  className="export-field__control"
+                />
+                <span className="export-field__hint">
+                  {getSizeModeHint(imageExportForm.sizeMode)}
+                </span>
+              </label>
+
+              {imageExportForm.format === "jpeg" && (
+                <>
+                  <div className="export-field">
+                    <span className="export-field__label">JPEG quality</span>
+                    <div className="export-mode-group" role="group" aria-label="JPEG quality">
+                      {(
+                        [
+                          ["low", "Low"],
+                          ["medium", "Medium"],
+                          ["high", "High"],
+                          ["custom", "Custom"],
+                        ] as const
+                      ).map(([qualityPreset, label]) => (
+                        <button
+                          key={qualityPreset}
+                          type="button"
+                          className={`export-mode-group__button ${imageExportForm.jpegQualityPreset === qualityPreset ? "export-mode-group__button--active" : ""}`}
+                          onClick={() =>
+                            handleImageExportFieldChange(
+                              "jpegQualityPreset",
+                              qualityPreset,
+                            )
+                          }
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="export-field__hint">
+                      Low = 60, Medium = 82, High = 92.
+                    </span>
+                  </div>
+
+                  {imageExportForm.jpegQualityPreset === "custom" && (
+                    <label className="export-field">
+                      <span className="export-field__label">
+                        Custom JPEG quality
+                      </span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        step="1"
+                        inputMode="numeric"
+                        value={imageExportForm.jpegQualityCustomValue}
+                        onChange={(e) =>
+                          handleImageExportFieldChange(
+                            "jpegQualityCustomValue",
+                            e.target.value,
+                          )
+                        }
+                        className="export-field__control"
+                      />
+                      <span className="export-field__hint">
+                        Enter a value from 1 to 100.
+                      </span>
+                    </label>
+                  )}
+                </>
+              )}
+
+              <div className="export-dialog__meta">
+                {selectedPages.length === 1
+                  ? `One ${getImageExportFormatLabel(imageExportForm.format)} file will be downloaded.`
+                  : `Multiple pages will be bundled into one ZIP archive of ${getImageExportFormatLabel(imageExportForm.format)} files.`}
+              </div>
+
+              {imageExportError && (
+                <div className="export-dialog__error">{imageExportError}</div>
+              )}
+
+              <div className="export-dialog__actions">
+                <button
+                  type="button"
+                  className="app__action app__action--subtle"
+                  onClick={closeImageExportDialog}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="app__action app__action--primary"
+                  disabled={isProcessing}
+                >
+                  <ImageDown className="app__action-icon" />
+                  {processingTask === "export-images"
+                    ? "Exporting..."
+                    : "Download images"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {isPreviewOpen && selectedSinglePage && (
+        <div className="preview-modal" role="dialog" aria-modal="true">
+          <div className="preview-modal__backdrop" onClick={closePreview} />
+          <div className="preview-modal__panel">
+            <button
+              type="button"
+              className="preview-modal__close"
+              onClick={closePreview}
+              aria-label="Close preview"
+            >
+              <X className="preview-modal__close-icon" />
+            </button>
+            <div className="preview-modal__meta">
+              <div className="preview-modal__title">
+                {sourceFiles[selectedSinglePage.fileId]?.name}
+              </div>
+              <div className="preview-modal__subtitle">
+                Page{" "}
+                {selectedSinglePage.label
+                  ? selectedSinglePage.label
+                  : selectedSinglePage.pageIndex + 1}
+              </div>
+            </div>
+            <div className="preview-modal__viewport">
+              {previewImageUrl ? (
+                <img
+                  src={previewImageUrl}
+                  alt={`Preview of page ${selectedSinglePage.pageIndex + 1}`}
+                  className="preview-modal__image"
+                />
+              ) : (
+                <div className="preview-modal__loading">Loading preview...</div>
+              )}
+              {isPreviewLoading && (
+                <div className="preview-modal__status">
+                  Rendering preview...
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

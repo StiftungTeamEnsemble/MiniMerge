@@ -164,6 +164,16 @@
   background: var(--color-red-50);
 }
 
+.app__action--subtle {
+  background: var(--color-gray-100);
+  color: var(--color-gray-700);
+}
+
+.app__action--subtle:hover:not(:disabled) {
+  background: var(--color-gray-200);
+  color: var(--color-black);
+}
+
 .app__action--primary {
   padding-inline: 1rem;
   background: var(--color-black);
@@ -172,6 +182,15 @@
 
 .app__action--primary:hover:not(:disabled) {
   background: var(--color-gray-800);
+}
+
+.app__action-shortcut {
+  padding: 0.1rem 0.4rem;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .app__main {
@@ -574,6 +593,267 @@
   flex: 0 0 auto;
 }
 
+.overlay-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh 1.5rem 1.5rem;
+  background: rgba(17, 24, 39, 0.42);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.command-palette,
+.export-dialog {
+  width: min(100%, 40rem);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: var(--shadow-lg);
+}
+
+.command-palette {
+  overflow: hidden;
+}
+
+.command-palette__search {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--color-gray-200);
+}
+
+.command-palette__search-icon {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex: 0 0 auto;
+  color: var(--color-gray-400);
+}
+
+.command-palette__input,
+.export-field__control {
+  width: 100%;
+  border: 1px solid var(--color-gray-200);
+  border-radius: 0.75rem;
+  background: var(--color-white);
+  color: var(--color-black);
+  font: inherit;
+}
+
+.command-palette__input {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  font-size: 1rem;
+  outline: none;
+}
+
+.command-palette__results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+
+.command-palette__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  width: 100%;
+  padding: 0.875rem 1rem;
+  border: 0;
+  border-radius: 0.875rem;
+  background: transparent;
+  color: var(--color-black);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    transform 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.command-palette__item:hover:not(:disabled) {
+  background: var(--color-gray-50);
+  transform: translateY(-1px);
+}
+
+.command-palette__item:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.command-palette__item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.75rem;
+  background: var(--color-gray-100);
+  color: var(--color-black);
+  flex: 0 0 auto;
+}
+
+.command-palette__item-icon-svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.command-palette__item-copy {
+  min-width: 0;
+}
+
+.command-palette__item-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-gray-900);
+}
+
+.command-palette__item-description {
+  margin-top: 0.2rem;
+  font-size: 0.8125rem;
+  color: var(--color-gray-500);
+}
+
+.command-palette__empty {
+  padding: 1rem;
+  border-radius: 0.875rem;
+  background: var(--color-gray-50);
+  color: var(--color-gray-500);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.export-dialog {
+  padding: 1.25rem;
+}
+
+.export-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.export-dialog__title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--color-gray-900);
+}
+
+.export-dialog__subtitle {
+  margin: 0.35rem 0 0;
+  font-size: 0.875rem;
+  color: var(--color-gray-500);
+}
+
+.export-dialog__form {
+  margin-top: 1rem;
+}
+
+.export-dialog__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.export-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.export-field + .export-field,
+.export-dialog__grid + .export-field,
+.export-field + .export-dialog__meta,
+.export-dialog__meta + .export-dialog__error,
+.export-dialog__error + .export-dialog__actions {
+  margin-top: 1rem;
+}
+
+.export-field__label {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: var(--color-gray-500);
+}
+
+.export-field__control {
+  padding: 0.75rem 0.875rem;
+  outline: none;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.export-field__control:focus {
+  border-color: var(--color-black);
+  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
+}
+
+.export-field__hint {
+  font-size: 0.8125rem;
+  color: var(--color-gray-500);
+}
+
+.export-mode-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.export-mode-group__button {
+  appearance: none;
+  border: 1px solid var(--color-gray-200);
+  border-radius: 9999px;
+  background: var(--color-white);
+  color: var(--color-gray-700);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.export-mode-group__button--active {
+  border-color: var(--color-black);
+  background: var(--color-black);
+  color: var(--color-white);
+}
+
+.export-dialog__meta {
+  padding: 0.85rem 0.95rem;
+  border-radius: 0.875rem;
+  background: var(--color-gray-50);
+  font-size: 0.875rem;
+  color: var(--color-gray-600);
+}
+
+.export-dialog__error {
+  padding: 0.85rem 0.95rem;
+  border-radius: 0.875rem;
+  background: var(--color-red-50);
+  color: var(--color-red-600);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.export-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
 .preview-modal {
   position: fixed;
   inset: 0;
@@ -741,6 +1021,27 @@
   .app__toolbar {
     flex-wrap: wrap;
     gap: 0.75rem;
+  }
+
+  .overlay-shell {
+    padding: 1rem;
+  }
+
+  .export-dialog {
+    padding: 1rem;
+  }
+
+  .export-dialog__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .export-dialog__actions {
+    flex-direction: column-reverse;
+  }
+
+  .export-dialog__actions .app__action {
+    width: 100%;
+    justify-content: center;
   }
 
   .page-card__drop-indicator--grid .page-card__drop-indicator-label {
