@@ -248,7 +248,9 @@ function getExportFileName(
   format: ImageExportFormat,
 ): string {
   const fileBaseName = sanitizeFilePart(getFileBaseName(sourceFile.name));
-  const pageLabel = sanitizeFilePart(page.label || `page-${page.pageIndex + 1}`);
+  const pageLabel = sanitizeFilePart(
+    page.label || `page-${page.pageIndex + 1}`,
+  );
   const extension = getExportFileExtension(format);
   return `${String(pageIndex + 1).padStart(3, "0")}-${fileBaseName}-${pageLabel}.${extension}`;
 }
@@ -558,7 +560,9 @@ export async function exportPagesAsImages(
   options: ImageExportOptions,
 ): Promise<ExportedPageImage[]> {
   const openedDocs: Record<string, mupdf.Document> = {};
-  const availableFormats = getImageExportFormatsForColorSpace(options.colorSpace);
+  const availableFormats = getImageExportFormatsForColorSpace(
+    options.colorSpace,
+  );
 
   if (!availableFormats.includes(options.format)) {
     throw new Error(
@@ -584,7 +588,9 @@ export async function exportPagesAsImages(
         );
       }
 
-      const sourcePage = openedDocs[pageNode.fileId].loadPage(pageNode.pageIndex);
+      const sourcePage = openedDocs[pageNode.fileId].loadPage(
+        pageNode.pageIndex,
+      );
       try {
         const bounds = sourcePage.getBounds();
         const pageWidth = bounds[2] - bounds[0];
@@ -596,7 +602,11 @@ export async function exportPagesAsImages(
           pageHeight,
         );
         const renderMatrix = mupdf.Matrix.scale(scale, scale);
-        const pixmap = sourcePage.toPixmap(renderMatrix, resolvedColorSpace.colorSpace, false);
+        const pixmap = sourcePage.toPixmap(
+          renderMatrix,
+          resolvedColorSpace.colorSpace,
+          false,
+        );
 
         try {
           const effectiveResolution = getEffectiveResolution(
@@ -609,13 +619,16 @@ export async function exportPagesAsImages(
           const imageBuffer =
             options.format === "png"
               ? toBrowserUint8Array(pixmap.asPNG())
-              : toBrowserUint8Array(
-                  pixmap.asJPEG(options.jpegQuality ?? 82),
-                );
+              : toBrowserUint8Array(pixmap.asJPEG(options.jpegQuality ?? 82));
 
           exportedImages.push({
             pageId: pageNode.id,
-            fileName: getExportFileName(pageNode, index, sourceFile, options.format),
+            fileName: getExportFileName(
+              pageNode,
+              index,
+              sourceFile,
+              options.format,
+            ),
             mimeType: getExportMimeType(options.format),
             width: pixmap.getWidth(),
             height: pixmap.getHeight(),

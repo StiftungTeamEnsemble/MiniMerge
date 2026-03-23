@@ -212,7 +212,9 @@ function getImageExportFormatLabel(format: ImageExportFormat): string {
   }
 }
 
-function getImageExportColorSpaceLabel(colorSpace: ImageExportColorSpace): string {
+function getImageExportColorSpaceLabel(
+  colorSpace: ImageExportColorSpace,
+): string {
   switch (colorSpace) {
     case "gray":
       return "Gray";
@@ -633,9 +635,7 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
       const isCommandShortcut =
-        (e.metaKey || e.ctrlKey) &&
-        !e.altKey &&
-        e.key.toLowerCase() === "k";
+        (e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k";
 
       if (isCommandShortcut) {
         e.preventDefault();
@@ -1139,11 +1139,14 @@ export default function App() {
       setImageExportForm((prev) => {
         if (key === "colorSpace") {
           const nextColorSpace = value as ImageExportColorSpace;
-          const nextFormats = getImageExportFormatsForColorSpace(nextColorSpace);
+          const nextFormats =
+            getImageExportFormatsForColorSpace(nextColorSpace);
           return {
             ...prev,
             colorSpace: nextColorSpace,
-            format: nextFormats.includes(prev.format) ? prev.format : nextFormats[0],
+            format: nextFormats.includes(prev.format)
+              ? prev.format
+              : nextFormats[0],
           };
         }
 
@@ -1252,12 +1255,7 @@ export default function App() {
         setProcessingTask(null);
       }
     },
-    [
-      closeImageExportDialog,
-      imageExportForm,
-      selectedPages,
-      sourceFiles,
-    ],
+    [closeImageExportDialog, imageExportForm, selectedPages, sourceFiles],
   );
 
   const handlePagePointerDown = useCallback(
@@ -1771,7 +1769,11 @@ export default function App() {
       </main>
 
       {isCommandPaletteOpen && (
-        <div className="overlay-shell" role="presentation" onClick={closeCommandPalette}>
+        <div
+          className="overlay-shell"
+          role="presentation"
+          onClick={closeCommandPalette}
+        >
           <div
             className="command-palette"
             role="dialog"
@@ -1858,7 +1860,10 @@ export default function App() {
               </button>
             </div>
 
-            <form className="export-dialog__form" onSubmit={handleImageExportSubmit}>
+            <form
+              className="export-dialog__form"
+              onSubmit={handleImageExportSubmit}
+            >
               <div className="export-dialog__grid">
                 <label className="export-field">
                   <span className="export-field__label">Colour output</span>
@@ -1900,20 +1905,28 @@ export default function App() {
 
               {imageExportColorSpaceStatus.message && (
                 <div className="export-dialog__meta">
-                  <strong>{getImageExportColorSpaceLabel(imageExportForm.colorSpace)}:</strong>{" "}
+                  <strong>
+                    {getImageExportColorSpaceLabel(imageExportForm.colorSpace)}:
+                  </strong>{" "}
                   {imageExportColorSpaceStatus.message}
                 </div>
               )}
 
               <div className="export-field">
                 <span className="export-field__label">Resolution mode</span>
-                <div className="export-mode-group" role="group" aria-label="Resolution mode">
+                <div
+                  className="export-mode-group"
+                  role="group"
+                  aria-label="Resolution mode"
+                >
                   {(["dpi", "width", "height"] as const).map((sizeMode) => (
                     <button
                       key={sizeMode}
                       type="button"
                       className={`export-mode-group__button ${imageExportForm.sizeMode === sizeMode ? "export-mode-group__button--active" : ""}`}
-                      onClick={() => handleImageExportFieldChange("sizeMode", sizeMode)}
+                      onClick={() =>
+                        handleImageExportFieldChange("sizeMode", sizeMode)
+                      }
                     >
                       {sizeMode === "dpi"
                         ? "DPI"
@@ -1950,7 +1963,11 @@ export default function App() {
                 <>
                   <div className="export-field">
                     <span className="export-field__label">JPEG quality</span>
-                    <div className="export-mode-group" role="group" aria-label="JPEG quality">
+                    <div
+                      className="export-mode-group"
+                      role="group"
+                      aria-label="JPEG quality"
+                    >
                       {(
                         [
                           ["low", "Low"],

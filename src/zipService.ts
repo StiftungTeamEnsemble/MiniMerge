@@ -47,20 +47,12 @@ function getDosDateTime(date: Date): { dosDate: number; dosTime: number } {
   };
 }
 
-function writeUint16(
-  view: DataView,
-  offset: number,
-  value: number,
-): number {
+function writeUint16(view: DataView, offset: number, value: number): number {
   view.setUint16(offset, value, true);
   return offset + 2;
 }
 
-function writeUint32(
-  view: DataView,
-  offset: number,
-  value: number,
-): number {
+function writeUint32(view: DataView, offset: number, value: number): number {
   view.setUint32(offset, value >>> 0, true);
   return offset + 4;
 }
@@ -74,7 +66,9 @@ function writeBytes(
   return offset + bytes.length;
 }
 
-export function buildZipArchive(files: ZipFileInput[]): Uint8Array<ArrayBuffer> {
+export function buildZipArchive(
+  files: ZipFileInput[],
+): Uint8Array<ArrayBuffer> {
   const now = new Date();
   const entries: ZipEntry[] = [];
   let totalSize = 0;
@@ -143,7 +137,8 @@ export function buildZipArchive(files: ZipFileInput[]): Uint8Array<ArrayBuffer> 
     offset = writeBytes(zip, offset, entry.nameBytes);
   }
 
-  const centralDirectorySize = endOfCentralDirectoryOffset - centralDirectoryOffset;
+  const centralDirectorySize =
+    endOfCentralDirectoryOffset - centralDirectoryOffset;
 
   offset = writeUint32(view, offset, 0x06054b50);
   offset = writeUint16(view, offset, 0);
