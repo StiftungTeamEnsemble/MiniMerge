@@ -54,6 +54,18 @@
   letter-spacing: -0.025em;
 }
 
+.app__brand-name {
+  white-space: nowrap;
+}
+
+.app__brand-tagline {
+  color: var(--color-gray-500);
+  font-size: 0.875rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
 .app__brand-icon {
   width: 1.25rem;
   height: 1.25rem;
@@ -720,6 +732,10 @@
   .app__header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .app__brand-tagline {
+    display: none;
   }
 
   .app__toolbar {

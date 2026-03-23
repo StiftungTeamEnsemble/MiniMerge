@@ -1149,7 +1149,8 @@ export default function App() {
       <header className="app__header">
         <h1 className="app__brand">
           <FileText className="app__brand-icon" />
-          MiniMerge
+          <span className="app__brand-name">MiniMerge</span>
+          <span className="app__brand-tagline">Process PDF pages</span>
         </h1>
         <div className="app__toolbar">
           <div className="app__view-toggle">
