@@ -680,6 +680,11 @@
   transform: translateY(-1px);
 }
 
+.command-palette__item--active:not(:disabled) {
+  background: var(--color-gray-50);
+  box-shadow: inset 0 0 0 1px var(--color-gray-200);
+}
+
 .command-palette__item:disabled {
   cursor: default;
   opacity: 0.45;
@@ -773,6 +778,10 @@
 .export-dialog__meta + .export-dialog__error,
 .export-dialog__error + .export-dialog__actions {
   margin-top: 1rem;
+}
+
+.export-dialog__grid > .export-field + .export-field {
+  margin-top: 0;
 }
 
 .export-field__label {

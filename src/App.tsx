@@ -14,7 +14,6 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import {
-  Command,
   Upload,
   Grid as GridIcon,
   List as ListIcon,
@@ -24,6 +23,10 @@ import {
   FileText,
   X,
 } from "lucide-react";
+import {
+  CommandPalette,
+  type CommandPaletteCommand,
+} from "./CommandPalette";
 import {
   FILE_INPUT_ACCEPT,
   exportPagesAsImages,
@@ -300,14 +303,12 @@ export default function App() {
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [isImageExportDialogOpen, setIsImageExportDialogOpen] = useState(false);
   const [imageExportForm, setImageExportForm] = useState<ImageExportFormState>(
     DEFAULT_IMAGE_EXPORT_FORM,
   );
   const [imageExportError, setImageExportError] = useState<string | null>(null);
   const emptyFileInputRef = useRef<HTMLInputElement>(null);
-  const commandPaletteInputRef = useRef<HTMLInputElement>(null);
   const imageExportValueInputRef = useRef<HTMLInputElement>(null);
   const pageCollectionRef = useRef<HTMLDivElement>(null);
   const pendingThumbnailPageIdsRef = useRef<Set<string>>(new Set());
@@ -415,7 +416,6 @@ export default function App() {
 
   const closeCommandPalette = useCallback(() => {
     setIsCommandPaletteOpen(false);
-    setCommandPaletteQuery("");
   }, []);
 
   const closeImageExportDialog = useCallback(() => {
@@ -436,11 +436,10 @@ export default function App() {
 
     setImageExportError(null);
     setIsCommandPaletteOpen(false);
-    setCommandPaletteQuery("");
     setIsImageExportDialogOpen(true);
   }, [selectedPages.length]);
 
-  const commandPaletteCommands = [
+  const commandPaletteCommands: CommandPaletteCommand[] = [
     {
       id: DOWNLOAD_SELECTED_PAGES_COMMAND,
       title: "Download selected pages as images",
@@ -449,21 +448,9 @@ export default function App() {
           ? `Export ${selectedPages.length} selected page${selectedPages.length === 1 ? "" : "s"} with format, profile and resolution controls.`
           : "Select one or more pages to enable this export command.",
       disabled: selectedPages.length === 0,
+      icon: <ImageDown className="command-palette__item-icon-svg" />,
     },
   ];
-
-  const filteredCommandPaletteCommands = commandPaletteCommands.filter(
-    (command) => {
-      const query = commandPaletteQuery.trim().toLowerCase();
-      if (!query) {
-        return true;
-      }
-
-      return `${command.title} ${command.description}`
-        .toLowerCase()
-        .includes(query);
-    },
-  );
 
   const handleRunCommand = useCallback(
     (commandId: string) => {
@@ -755,15 +742,6 @@ export default function App() {
     selectedPageIds,
     selectedSinglePageId,
   ]);
-
-  useEffect(() => {
-    if (!isCommandPaletteOpen) {
-      return;
-    }
-
-    commandPaletteInputRef.current?.focus();
-    commandPaletteInputRef.current?.select();
-  }, [isCommandPaletteOpen]);
 
   useEffect(() => {
     if (!isImageExportDialogOpen) {
@@ -1110,25 +1088,6 @@ export default function App() {
 
     setSelectedPageIds(nextSelectedIds);
   };
-
-  const handleCommandPaletteInputKeyDown = useCallback(
-    (e: ReactKeyboardEvent<HTMLInputElement>) => {
-      if (e.key !== "Enter") {
-        return;
-      }
-
-      const firstEnabledCommand = filteredCommandPaletteCommands.find(
-        (command) => !command.disabled,
-      );
-      if (!firstEnabledCommand) {
-        return;
-      }
-
-      e.preventDefault();
-      handleRunCommand(firstEnabledCommand.id);
-    },
-    [filteredCommandPaletteCommands, handleRunCommand],
-  );
 
   const handleImageExportFieldChange = useCallback(
     <K extends keyof ImageExportFormState>(
@@ -1769,61 +1728,11 @@ export default function App() {
       </main>
 
       {isCommandPaletteOpen && (
-        <div
-          className="overlay-shell"
-          role="presentation"
-          onClick={closeCommandPalette}
-        >
-          <div
-            className="command-palette"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Command palette"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="command-palette__search">
-              <Command className="command-palette__search-icon" />
-              <input
-                ref={commandPaletteInputRef}
-                type="text"
-                value={commandPaletteQuery}
-                onChange={(e) => setCommandPaletteQuery(e.target.value)}
-                onKeyDown={handleCommandPaletteInputKeyDown}
-                className="command-palette__input"
-                placeholder="Type a command"
-              />
-            </div>
-            <div className="command-palette__results">
-              {filteredCommandPaletteCommands.length > 0 ? (
-                filteredCommandPaletteCommands.map((command) => (
-                  <button
-                    key={command.id}
-                    type="button"
-                    disabled={command.disabled}
-                    className="command-palette__item"
-                    onClick={() => handleRunCommand(command.id)}
-                  >
-                    <div className="command-palette__item-icon">
-                      <ImageDown className="command-palette__item-icon-svg" />
-                    </div>
-                    <div className="command-palette__item-copy">
-                      <div className="command-palette__item-title">
-                        {command.title}
-                      </div>
-                      <div className="command-palette__item-description">
-                        {command.description}
-                      </div>
-                    </div>
-                  </button>
-                ))
-              ) : (
-                <div className="command-palette__empty">
-                  No commands match “{commandPaletteQuery}”.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <CommandPalette
+          commands={commandPaletteCommands}
+          onClose={closeCommandPalette}
+          onRunCommand={handleRunCommand}
+        />
       )}
 
       {isImageExportDialogOpen && (
