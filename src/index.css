@@ -23,6 +23,11 @@ body {
   color: #000;
 }
 
+body,
+#root {
+  min-height: 100vh;
+}
+
 *,
 *::before,
 *::after {
@@ -38,4 +43,67 @@ label {
 ::selection {
   background: #000;
   color: #fff;
+}
+
+.boot-screen {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 2rem;
+  background:
+    radial-gradient(circle at top, rgba(0, 0, 0, 0.05), transparent 45%),
+    linear-gradient(180deg, #ffffff 0%, #f6f7f9 100%);
+}
+
+.boot-screen__panel {
+  width: min(100%, 32rem);
+  padding: 2rem;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 1.5rem;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    0 24px 48px rgba(0, 0, 0, 0.08),
+    0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  backdrop-filter: blur(14px);
+}
+
+.boot-screen__title {
+  margin: 0;
+  font-size: clamp(1.8rem, 5vw, 2.6rem);
+  line-height: 1.05;
+}
+
+.boot-screen__message {
+  margin: 0.9rem 0 0;
+  max-width: 28rem;
+  color: rgba(0, 0, 0, 0.68);
+}
+
+.boot-screen__progress {
+  position: relative;
+  margin-top: 1.5rem;
+  height: 0.4rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.boot-screen__progress-bar {
+  display: block;
+  width: 45%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #000 0%, #4b5563 100%);
+  animation: boot-screen-progress 1.2s ease-in-out infinite;
+  transform-origin: left;
+}
+
+@keyframes boot-screen-progress {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(230%);
+  }
 }
