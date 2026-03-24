@@ -23,10 +23,7 @@ import {
   FileText,
   X,
 } from "lucide-react";
-import {
-  CommandPalette,
-  type CommandPaletteCommand,
-} from "./CommandPalette";
+import { CommandPalette, type CommandPaletteCommand } from "./CommandPalette";
 import {
   FILE_INPUT_ACCEPT,
   exportPagesAsImages,
@@ -165,7 +162,9 @@ const THUMBNAIL_RENDER_BATCH_SIZE = 8;
 const TOUCH_DRAG_THRESHOLD_PX = 10;
 const AUTO_SCROLL_EDGE_PX = 96;
 const AUTO_SCROLL_MAX_SPEED_PX = 24;
+const DOWNLOAD_MERGED_PDF_COMMAND = "download-merged-pdf";
 const DOWNLOAD_SELECTED_PAGES_COMMAND = "download-selected-pages-as-images";
+const REMOVE_SELECTED_PAGES_COMMAND = "remove-selected-pages";
 
 interface ImageExportFormState {
   colorSpace: ImageExportColorSpace;
@@ -438,28 +437,6 @@ export default function App() {
     setIsCommandPaletteOpen(false);
     setIsImageExportDialogOpen(true);
   }, [selectedPages.length]);
-
-  const commandPaletteCommands: CommandPaletteCommand[] = [
-    {
-      id: DOWNLOAD_SELECTED_PAGES_COMMAND,
-      title: "Download selected pages as images",
-      description:
-        selectedPages.length > 0
-          ? `Export ${selectedPages.length} selected page${selectedPages.length === 1 ? "" : "s"} with format, profile and resolution controls.`
-          : "Select one or more pages to enable this export command.",
-      disabled: selectedPages.length === 0,
-      icon: <ImageDown className="command-palette__item-icon-svg" />,
-    },
-  ];
-
-  const handleRunCommand = useCallback(
-    (commandId: string) => {
-      if (commandId === DOWNLOAD_SELECTED_PAGES_COMMAND) {
-        openImageExportDialog();
-      }
-    },
-    [openImageExportDialog],
-  );
 
   const navigateSingleSelection = useCallback(
     (offset: number) => {
@@ -1367,7 +1344,7 @@ export default function App() {
     [clearSelection],
   );
 
-  const handleDownload = async () => {
+  const handleDownload = useCallback(async () => {
     if (pages.length === 0) {
       return;
     }
@@ -1385,7 +1362,69 @@ export default function App() {
     } finally {
       setProcessingTask(null);
     }
-  };
+  }, [pages, sourceFiles]);
+
+  const commandPaletteCommands: CommandPaletteCommand[] = [
+    {
+      id: DOWNLOAD_MERGED_PDF_COMMAND,
+      title: "Download merged PDF",
+      description:
+        pages.length > 0
+          ? `Merge all ${pages.length} page${pages.length === 1 ? "" : "s"} into one PDF and download it.`
+          : "Add one or more pages to enable merged PDF download.",
+      searchTerms: ["merge pdf", "export merged pdf"],
+      disabled: pages.length === 0 || isProcessing,
+      icon: <Download className="command-palette__item-icon-svg" />,
+    },
+    {
+      id: DOWNLOAD_SELECTED_PAGES_COMMAND,
+      title: "Download selected pages as images",
+      description:
+        selectedPages.length > 0
+          ? `Export ${selectedPages.length} selected page${selectedPages.length === 1 ? "" : "s"} with format, profile and resolution controls.`
+          : "Select one or more pages to enable this export command.",
+      searchTerms: ["export selected pages", "download selected pages"],
+      disabled: selectedPages.length === 0 || isProcessing,
+      icon: <ImageDown className="command-palette__item-icon-svg" />,
+    },
+    {
+      id: REMOVE_SELECTED_PAGES_COMMAND,
+      title: "Remove selected pages",
+      description:
+        selectedPages.length > 0
+          ? `Remove ${selectedPages.length} selected page${selectedPages.length === 1 ? "" : "s"} from the merge list.`
+          : "Select one or more pages to enable this command.",
+      searchTerms: ["delete selected pages"],
+      disabled: selectedPages.length === 0,
+      icon: <Trash2 className="command-palette__item-icon-svg" />,
+    },
+  ];
+
+  const handleRunCommand = useCallback(
+    (commandId: string) => {
+      closeCommandPalette();
+
+      if (commandId === DOWNLOAD_MERGED_PDF_COMMAND) {
+        void handleDownload();
+        return;
+      }
+
+      if (commandId === DOWNLOAD_SELECTED_PAGES_COMMAND) {
+        openImageExportDialog();
+        return;
+      }
+
+      if (commandId === REMOVE_SELECTED_PAGES_COMMAND) {
+        handleRemoveSelected();
+      }
+    },
+    [
+      closeCommandPalette,
+      handleDownload,
+      handleRemoveSelected,
+      openImageExportDialog,
+    ],
+  );
 
   const handlePageDragStart = (
     e: DragEvent<HTMLDivElement>,

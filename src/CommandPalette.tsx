@@ -6,6 +6,7 @@ export type CommandPaletteCommand = {
   id: string;
   title: string;
   description: string;
+  searchTerms?: string[];
   disabled?: boolean;
   icon?: ReactNode;
 };
@@ -27,12 +28,15 @@ function getWrappedCommandId(
   activeCommandId: string | null,
   direction: 1 | -1,
 ): string | null {
-  const enabledIndexes = commands.reduce<number[]>((indexes, command, index) => {
-    if (!command.disabled) {
-      indexes.push(index);
-    }
-    return indexes;
-  }, []);
+  const enabledIndexes = commands.reduce<number[]>(
+    (indexes, command, index) => {
+      if (!command.disabled) {
+        indexes.push(index);
+      }
+      return indexes;
+    },
+    [],
+  );
 
   if (enabledIndexes.length === 0) {
     return null;
@@ -73,7 +77,7 @@ export function CommandPalette({
       return true;
     }
 
-    return `${command.title} ${command.description}`
+    return `${command.title} ${command.description} ${(command.searchTerms ?? []).join(" ")}`
       .toLowerCase()
       .includes(normalizedQuery);
   });
