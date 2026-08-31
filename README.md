@@ -38,3 +38,7 @@ It is built for a simple job: take pages from different files, put them in the r
 npm install
 npm run dev
 ```
+
+## License
+
+The MiniMerge source code is [MIT](LICENSE). PDF handling uses [MuPDF](https://mupdf.readthedocs.io/), which is AGPL-3.0-or-later, so the built app is covered by the AGPL.
