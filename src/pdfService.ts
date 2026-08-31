@@ -7,6 +7,7 @@ const PNG_MIME_TYPE = "image/png";
 const PDF_GENERATOR_URL = "https://minimerge.signalwerk.ch/";
 const SRGB_PROFILE_URL = "/color-profiles/sRGB-IEC61966-2.1.icc";
 const SRGB_PROFILE_NAME = "sRGB IEC61966-2.1";
+const PDF_SAVE_OPTIONS = "compress,garbage=deduplicate,objstms";
 
 export type ImageExportFormat = "png" | "jpeg";
 export type ImageExportColorSpace = "gray" | "srgb";
@@ -509,9 +510,10 @@ export async function generateMergedPdf(
   sourceFiles: Record<string, SourceFile>,
 ): Promise<Uint8Array<ArrayBuffer>> {
   const openedDocs: Record<string, mupdf.Document> = {};
+  const graftMaps: Record<string, mupdf.PDFGraftMap> = {};
+  const finalPdf = new mupdf.PDFDocument();
 
   try {
-    const finalPdf = new mupdf.PDFDocument();
     finalPdf.setMetaData(
       mupdf.Document.META_INFO_CREATOR,
       `MiniMerge ${PDF_GENERATOR_URL}`,
@@ -537,7 +539,15 @@ export async function generateMergedPdf(
 
         const sourcePdf = openedDocs[pageNode.fileId].asPDF();
         if (sourcePdf) {
-          finalPdf.graftPage(-1, sourcePdf, pageNode.pageIndex);
+          if (!graftMaps[pageNode.fileId]) {
+            graftMaps[pageNode.fileId] = finalPdf.newGraftMap();
+          }
+
+          graftMaps[pageNode.fileId].graftPage(
+            -1,
+            sourcePdf,
+            pageNode.pageIndex,
+          );
         }
         continue;
       }
@@ -545,12 +555,20 @@ export async function generateMergedPdf(
       appendImageSource(finalPdf, sourceFile);
     }
 
-    const outBuffer = finalPdf.saveToBuffer("");
-    return toBrowserUint8Array(outBuffer.asUint8Array());
+    const outBuffer = finalPdf.saveToBuffer(PDF_SAVE_OPTIONS);
+    try {
+      return toBrowserUint8Array(outBuffer.asUint8Array());
+    } finally {
+      outBuffer.destroy();
+    }
   } finally {
+    for (const graftMap of Object.values(graftMaps)) {
+      graftMap.destroy();
+    }
     for (const doc of Object.values(openedDocs)) {
       doc.destroy();
     }
+    finalPdf.destroy();
   }
 }
 
